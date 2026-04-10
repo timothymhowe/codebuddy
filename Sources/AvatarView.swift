@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AvatarView: View {
     @ObservedObject var state: BuddyState
+    @ObservedObject var settings: BuddySettings
     @State private var bounce: CGFloat = 0
     @State private var isBlinking = false
     @State private var currentPhrase: String?
@@ -70,32 +71,27 @@ struct AvatarView: View {
     }
 
     private func updatePhrase() {
-        // Try AI-generated snarky response first
+        // Only auto-speak on error/success — claude handles snark via the skill
+        guard state.currentState == .error || state.currentState == .success else { return }
+
         if snarky.isAvailable {
             snarky.generate(activity: state.currentState, context: state.lastContext) { [self] text in
-                if let text = text {
-                    showBubble(text)
-                } else {
-                    // Fallback to canned phrase
-                    if let phrase = persona.randomPhrase(for: state.currentState) {
-                        showBubble(phrase)
-                    }
-                }
+                showBubble(text ?? persona.randomPhrase(for: state.currentState) ?? "")
             }
-        } else {
-            // No API key — use canned phrases
-            if let phrase = persona.randomPhrase(for: state.currentState) {
-                showBubble(phrase)
-            }
+        } else if let phrase = persona.randomPhrase(for: state.currentState) {
+            showBubble(phrase)
         }
     }
 
     private func showBubble(_ text: String) {
+        guard settings.speechBubbleEnabled else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
             currentPhrase = text
             showPhrase = true
         }
-        voice.speak(text, persona: persona.id, activity: state.currentState)
+        if settings.voiceEnabled {
+            voice.speak(text, persona: persona.id, activity: state.currentState)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             withAnimation(.easeOut(duration: 0.3)) {
                 showPhrase = false

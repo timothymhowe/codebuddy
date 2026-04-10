@@ -6,6 +6,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel!
     var statusItem: NSStatusItem!
     let buddyState = BuddyState()
+    let settings = BuddySettings()
 
     private var walkObserver: Any?
 
@@ -17,10 +18,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Watch for state changes to trigger walking
         walkObserver = buddyState.$currentState.sink { [weak self] state in
             guard let self = self else { return }
-            if state == .coding {
-                // Delay walk until jump animation finishes (0.8s)
+            if state == .coding && self.settings.walkEnabled {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    if self.buddyState.currentState == .coding {
+                    if self.buddyState.currentState == .coding && self.settings.walkEnabled {
                         self.panel.startWalking()
                     }
                 }
@@ -33,7 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Panel
 
     private func setupPanel() {
-        let avatarView = AvatarView(state: buddyState)
+        let avatarView = AvatarView(state: buddyState, settings: settings)
 
         panel = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: 180, height: 180),
@@ -66,7 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func refreshPanel() {
-        let avatarView = AvatarView(state: buddyState)
+        let avatarView = AvatarView(state: buddyState, settings: settings)
         panel.contentView = NSHostingView(rootView: avatarView)
     }
 
@@ -159,6 +159,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(testItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        // Settings submenu
+        let settingsMenu = NSMenu()
+        let toggles: [(String, Bool, Selector)] = [
+            ("Voice", settings.voiceEnabled, #selector(toggleVoice)),
+            ("Speech Bubbles", settings.speechBubbleEnabled, #selector(toggleBubbles)),
+            ("Draggable", settings.draggable, #selector(toggleDraggable)),
+            ("Walk on Coding", settings.walkEnabled, #selector(toggleWalk)),
+            ("Gravity", settings.gravityEnabled, #selector(toggleGravity)),
+        ]
+        for (title, enabled, action) in toggles {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.state = enabled ? .on : .off
+            settingsMenu.addItem(item)
+        }
+        let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        settingsItem.submenu = settingsMenu
+        menu.addItem(settingsItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(
             title: "Quit CodeBuddy",
             action: #selector(NSApplication.terminate(_:)),
@@ -179,5 +200,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let stateStr = sender.representedObject as? String,
               let activity = BuddyActivity(rawValue: stateStr) else { return }
         buddyState.currentState = activity
+    }
+
+    // MARK: - Settings toggles
+
+    @objc private func toggleVoice() {
+        settings.voiceEnabled.toggle()
+        statusItem.menu = buildMenu()
+    }
+    @objc private func toggleBubbles() {
+        settings.speechBubbleEnabled.toggle()
+        statusItem.menu = buildMenu()
+    }
+    @objc private func toggleDraggable() {
+        settings.draggable.toggle()
+        panel.isMovableByWindowBackground = settings.draggable
+        statusItem.menu = buildMenu()
+    }
+    @objc private func toggleWalk() {
+        settings.walkEnabled.toggle()
+        if !settings.walkEnabled { panel.stopWalking() }
+        statusItem.menu = buildMenu()
+    }
+    @objc private func toggleGravity() {
+        settings.gravityEnabled.toggle()
+        panel.gravityEnabled = settings.gravityEnabled
+        statusItem.menu = buildMenu()
     }
 }

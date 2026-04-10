@@ -12,6 +12,7 @@ enum BuddyActivity: String, Codable, Equatable {
 struct BuddyEvent: Codable {
     let state: BuddyActivity
     let context: String?
+    let mentioned: Bool?
 }
 
 struct BuddyConfig: Codable {
@@ -50,7 +51,7 @@ class BuddyState: ObservableObject {
 
         // Ensure state file exists
         if !FileManager.default.fileExists(atPath: stateFilePath) {
-            if let data = try? JSONEncoder().encode(BuddyEvent(state: .idle, context: nil)) {
+            if let data = try? JSONEncoder().encode(BuddyEvent(state: .idle, context: nil, mentioned: nil)) {
                 try? data.write(to: URL(fileURLWithPath: stateFilePath))
             }
         }

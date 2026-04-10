@@ -13,6 +13,7 @@ class FloatingPanel: NSPanel {
     private(set) var walkDirection: CGFloat = -1 // -1 = left, 1 = right
     private(set) var isWalking = false
     var onEdgeHit: ((_ newDirection: CGFloat) -> Void)?
+    var gravityEnabled: Bool = true
 
     init(contentRect: NSRect, backing: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(
@@ -58,7 +59,7 @@ class FloatingPanel: NSPanel {
         isMovableByWindowBackground = true // reset for next drag
         dragStart = nil
         super.mouseUp(with: event)
-        startFalling()
+        if gravityEnabled { startFalling() }
     }
 
     private func startFalling() {

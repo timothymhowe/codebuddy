@@ -15,7 +15,15 @@ struct LowPolyHead: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    class Coordinator {
+    class Coordinator: NSObject, SCNSceneRendererDelegate {
+        func renderer(_ renderer: SCNSceneRenderer, didApplyAnimationsAtTime time: TimeInterval) {
+            // Clamp X and Z rotation to prevent backward tilt drift
+            guard let ch = charNode, hasCustomModel else { return }
+            ch.eulerAngles.x = savedEuler.x
+            ch.eulerAngles.z = savedEuler.z
+            // Y is allowed to change (walk direction)
+        }
+
         var charNode: SCNNode?
         var headNode: SCNNode?
         var leftEyeNode: SCNNode?
@@ -32,6 +40,7 @@ struct LowPolyHead: NSViewRepresentable {
         var totalFrames: Double = 593
         var edgeObserver: Any?
         var baseScale: CGFloat = 1.0
+        var savedEuler: SCNVector3 = .init()
     }
 
     // MARK: - Animation segments (frames at 25fps, 593 total)
@@ -615,8 +624,9 @@ struct LowPolyHead: NSViewRepresentable {
         }
         fixEyes(character)
 
-        // Store base scale for jiggle calculations
+        // Store base scale and initial rotation for clamping
         context.coordinator.baseScale = fitScale
+        context.coordinator.savedEuler = character.eulerAngles
         context.coordinator.hasCustomModel = true
         if let seg = LowPolyHead.animSegments["idle2"] {
             LowPolyHead.applySegment(seg, to: character)
@@ -686,6 +696,7 @@ struct LowPolyHead: NSViewRepresentable {
         }
 
         view.scene = scene
+        view.delegate = context.coordinator
         return view
     }
 
@@ -721,12 +732,11 @@ struct LowPolyHead: NSViewRepresentable {
 
         // Single timer for looping — restarts all anims together
         if seg.loops {
-            // Preserve the current Y rotation (walk facing direction)
-            let savedY = node.eulerAngles.y
+            // Preserve rotation so animations can't drift any axis
+            let savedAngles = node.eulerAngles
             loopTimer = Timer.scheduledTimer(withTimeInterval: seg.duration, repeats: true) { _ in
                 apply(node)
-                // Reset rotation that the animation might have drifted
-                node.eulerAngles.y = savedY
+                node.eulerAngles = savedAngles
             }
         }
     }
