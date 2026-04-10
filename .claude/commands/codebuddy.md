@@ -1,3 +1,4 @@
 Run: bash ~/.codebuddy/hooks/buddy-hook.sh $ARGUMENTS
 
-If no arguments, use "success". Valid: idle thinking coding running error success
+No args = "success". States: idle thinking coding running error success happy treat
+Send message: say "your message"

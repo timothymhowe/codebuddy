@@ -13,6 +13,7 @@ struct BuddyEvent: Codable {
     let state: BuddyActivity
     let context: String?
     let mentioned: Bool?
+    let message: String?
 }
 
 struct BuddyConfig: Codable {
@@ -24,6 +25,7 @@ struct BuddyConfig: Codable {
 class BuddyState: ObservableObject {
     @Published var currentState: BuddyActivity = .idle
     @Published var lastContext: String?
+    @Published var lastMessage: String?
     @Published var selectedPersona: Persona
 
     private var fileMonitor: DispatchSourceFileSystemObject?
@@ -51,7 +53,7 @@ class BuddyState: ObservableObject {
 
         // Ensure state file exists
         if !FileManager.default.fileExists(atPath: stateFilePath) {
-            if let data = try? JSONEncoder().encode(BuddyEvent(state: .idle, context: nil, mentioned: nil)) {
+            if let data = try? JSONEncoder().encode(BuddyEvent(state: .idle, context: nil, mentioned: nil, message: nil)) {
                 try? data.write(to: URL(fileURLWithPath: stateFilePath))
             }
         }
@@ -110,6 +112,7 @@ class BuddyState: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.currentState = event.state
             self?.lastContext = event.context
+            self?.lastMessage = (event.message?.isEmpty == false) ? event.message : nil
 
             // Auto-reset transient states
             if event.state == .success || event.state == .error {

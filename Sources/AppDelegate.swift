@@ -158,6 +158,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         testItem.submenu = testMenu
         menu.addItem(testItem)
 
+        // Test individual animation clips
+        let clipMenu = NSMenu()
+        for name in ["idle1","idle2","jump","walk","run","run2","falls1","falls2","falls3",
+                      "wakesup1","wakesup2","wakesup3","no","yes","waving","happy",
+                      "attack1","attack2","dmg1","dmg2"] {
+            let item = NSMenuItem(title: name, action: #selector(testClip(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = name
+            clipMenu.addItem(item)
+        }
+        let clipItem = NSMenuItem(title: "Test Clips", action: nil, keyEquivalent: "")
+        clipItem.submenu = clipMenu
+        menu.addItem(clipItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // Settings submenu
@@ -175,6 +189,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.state = enabled ? .on : .off
             settingsMenu.addItem(item)
         }
+        // Volume
+        settingsMenu.addItem(NSMenuItem.separator())
+        let volLabel = NSMenuItem(title: "Volume: \(Int(settings.volume * 100))%", action: nil, keyEquivalent: "")
+        volLabel.isEnabled = false
+        settingsMenu.addItem(volLabel)
+        for (label, val) in [("Mute", Float(0)), ("25%", Float(0.25)), ("50%", Float(0.5)), ("75%", Float(0.75)), ("100%", Float(1.0))] {
+            let item = NSMenuItem(title: label, action: #selector(setVolume(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = val
+            item.state = abs(settings.volume - val) < 0.05 ? .on : .off
+            settingsMenu.addItem(item)
+        }
+
         let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
@@ -202,6 +229,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buddyState.currentState = activity
     }
 
+    @objc private func testClip(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        NotificationCenter.default.post(
+            name: NSNotification.Name("BuddyTestClip"),
+            object: nil,
+            userInfo: ["clip": name]
+        )
+    }
+
     // MARK: - Settings toggles
 
     @objc private func toggleVoice() {
@@ -225,6 +261,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleGravity() {
         settings.gravityEnabled.toggle()
         panel.gravityEnabled = settings.gravityEnabled
+        statusItem.menu = buildMenu()
+    }
+    @objc private func setVolume(_ sender: NSMenuItem) {
+        guard let vol = sender.representedObject as? Float else { return }
+        settings.volume = vol
         statusItem.menu = buildMenu()
     }
 }

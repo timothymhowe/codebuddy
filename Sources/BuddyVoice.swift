@@ -1,127 +1,99 @@
 import AppKit
 import AVFoundation
 
-/// Animal Crossing-style babble using synthesized tones
+/// Undertale-style voice: plays a sound clip per letter, pauses on spaces
 class BuddyVoice {
-    private var player: AVAudioPlayer?
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
-    private var isSetup = false
+    private var activePlayers: [AVAudioPlayer] = []
+    private var babbleTimer: Timer?
+    private var clipData: Data?
+    private var masterVolume: Float = 0.3
 
-    /// Map activity states to sound file keywords
-    private static let activityToSound: [BuddyActivity: [String]] = [
-        .idle:     ["happy"],
-        .thinking: ["confused", "question"],
-        .coding:   ["happy"],
-        .running:  ["happy", "question"],
-        .error:    ["error"],
-        .success:  ["happy"],
-    ]
-
-    private func customSoundPath(persona: String, activity: BuddyActivity) -> String? {
-        let dir = FileManager.default.currentDirectoryPath + "/sounds/" + persona + "/"
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return nil }
-        let soundFiles = files.filter { $0.hasSuffix(".wav") || $0.hasSuffix(".mp3") }
-        guard !soundFiles.isEmpty else { return nil }
-        let keywords = BuddyVoice.activityToSound[activity] ?? ["happy"]
-        for keyword in keywords {
-            if let match = soundFiles.first(where: { $0.lowercased().contains(keyword) }) {
-                return dir + match
+    init() {
+        // Load the voice clip into memory
+        let paths = [
+            FileManager.default.currentDirectoryPath + "/sounds/buddyvoice.wav",
+            NSHomeDirectory() + "/.codebuddy/sounds/buddyvoice.wav",
+        ]
+        for path in paths {
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+                clipData = data
+                break
             }
         }
-        return dir + soundFiles.randomElement()!
     }
 
-    func speak(_ text: String, persona personaId: String, activity: BuddyActivity = .idle) {
+    func speak(_ text: String, persona personaId: String, activity: BuddyActivity = .idle, volume: Float = 0.3) {
         stop()
+        self.masterVolume = volume
+        guard clipData != nil else { return }
 
-        // Custom wav for error/success
-        if activity == .error || activity == .success {
-            if let path = customSoundPath(persona: personaId, activity: activity) {
-                if let p = try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: path)) {
-                    p.volume = 0.35
-                    p.play()
-                    player = p
-                    return
-                }
+        // Cycling cadence: word1 = 1 beep, word2 = every 3rd, word3 = every letter, repeat
+        let words = text.split(separator: " ")
+        var queue: [(char: Character, shouldBeep: Bool)] = []
+
+        for (wordIdx, word) in words.enumerated() {
+            let letters = Array(word).filter { $0.isLetter || $0.isNumber }
+            let phase = wordIdx % 3
+            let beepEvery: Int
+            switch phase {
+            case 0:  beepEvery = max(letters.count, 1) // 1 beep for the whole word
+            case 1:  beepEvery = 3                      // every 3rd letter
+            default: beepEvery = 1                      // every letter
             }
+            for (i, letter) in letters.enumerated() {
+                queue.append((letter, i % beepEvery == 0))
+            }
+            queue.append((" ", false))
         }
 
-        // Animalese: generate tone sequence from text
-        babble(text: text)
+        var index = 0
+        let letterInterval: TimeInterval = 0.09
+        let spaceInterval: TimeInterval = 0.14
+
+        babbleTimer = Timer.scheduledTimer(withTimeInterval: letterInterval, repeats: true) { [weak self] timer in
+            guard let self = self, index < queue.count else {
+                timer.invalidate()
+                return
+            }
+
+            let item = queue[index]
+            index += 1
+
+            if item.char == " " {
+                timer.fireDate = timer.fireDate.addingTimeInterval(spaceInterval - letterInterval)
+                return
+            }
+
+            if item.shouldBeep {
+                self.playClip()
+            }
+        }
     }
 
     func stop() {
-        player?.stop()
-        if engine.isRunning { engine.stop() }
-        playerNode.stop()
+        babbleTimer?.invalidate()
+        babbleTimer = nil
+        for p in activePlayers { p.stop() }
+        activePlayers.removeAll()
     }
 
-    // MARK: - Tone-based Animalese
+    private func playClip() {
+        guard let data = clipData else { return }
+        // Don't cut previous — let it ring out (undertale style)
+        guard let p = try? AVAudioPlayer(data: data) else { return }
+        p.enableRate = true
+        p.rate = Float.random(in: 1.3...1.6)
+        p.volume = masterVolume * 0.5
+        p.prepareToPlay()
+        p.play()
 
-    private func babble(text: String) {
-        let sampleRate: Double = 44100
-        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
-
-        // Map each letter to a frequency (vowels = distinct pitches, consonants = noise-ish)
-        let baseFreq: Double = 400
-        let letterFreqs: [Character: Double] = [
-            "a": 440, "e": 520, "i": 600, "o": 380, "u": 340,
-        ]
-
-        // Build audio buffer from text
-        let syllableDuration: Double = 0.065 // very short per letter
-        let pauseDuration: Double = 0.03
-        let maxLetters = 15
-        let letters = Array(text.lowercased().filter { $0.isLetter }.prefix(maxLetters))
-        guard !letters.isEmpty else { return }
-
-        let totalSamples = Int(Double(letters.count) * (syllableDuration + pauseDuration) * sampleRate)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(totalSamples)) else { return }
-        buffer.frameLength = AVAudioFrameCount(totalSamples)
-        let data = buffer.floatChannelData![0]
-
-        var sampleIdx = 0
-        for letter in letters {
-            let freq = letterFreqs[letter] ?? (baseFreq + Double(letter.asciiValue ?? 100) * 2.5)
-            // Add slight random pitch variation for natural feel
-            let actualFreq = freq * Double.random(in: 0.92...1.08)
-            let syllableSamples = Int(syllableDuration * sampleRate)
-            let pauseSamples = Int(pauseDuration * sampleRate)
-
-            // Generate sine wave syllable with envelope
-            for i in 0..<syllableSamples {
-                if sampleIdx >= totalSamples { break }
-                let t = Double(i) / sampleRate
-                let envelope = sin(Double.pi * Double(i) / Double(syllableSamples)) // smooth fade in/out
-                let sample = sin(2.0 * Double.pi * actualFreq * t) * envelope * 0.3
-                data[sampleIdx] = Float(sample)
-                sampleIdx += 1
-            }
-
-            // Silence between syllables
-            for _ in 0..<pauseSamples {
-                if sampleIdx >= totalSamples { break }
-                data[sampleIdx] = 0
-                sampleIdx += 1
-            }
+        // Fade out after ~80ms so the tail is soft, not abrupt
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            p.setVolume(0, fadeDuration: 0.05)
         }
 
-        // Play through AVAudioEngine
-        if !isSetup {
-            engine.attach(playerNode)
-            engine.connect(playerNode, to: engine.mainMixerNode, format: format)
-            isSetup = true
-        }
-
-        do {
-            if !engine.isRunning { try engine.start() }
-            playerNode.stop()
-            playerNode.scheduleBuffer(buffer, completionHandler: nil)
-            playerNode.volume = 0.5
-            playerNode.play()
-        } catch {
-            // silently fail
-        }
+        activePlayers.append(p)
+        // Clean up finished players
+        activePlayers.removeAll { !$0.isPlaying }
     }
 }

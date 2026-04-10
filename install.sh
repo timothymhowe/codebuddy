@@ -59,11 +59,30 @@ if [ -f "$SETTINGS" ]; then
         echo "  Hooks already configured in settings.json"
     else
         echo "  ⚠️  Add CodeBuddy hooks to $SETTINGS manually (see README)"
+        # Try to add auto-approve permission if not present
+        if ! grep -q "buddy-hook" "$SETTINGS" 2>/dev/null || true; then
+            python3 -c "
+import json, sys
+with open('$SETTINGS') as f: s = json.load(f)
+p = s.setdefault('permissions', {})
+a = p.setdefault('allow', [])
+rule = 'Bash(bash ~/.codebuddy/hooks/buddy-hook.sh*)'
+if rule not in a:
+    a.append(rule)
+    with open('$SETTINGS', 'w') as f: json.dump(s, f, indent=2)
+    print('  Added auto-approve permission for buddy hook')
+" 2>/dev/null
+        fi
     fi
 else
     # Create settings with hooks
     cat > "$SETTINGS" << 'SETTINGS'
 {
+  "permissions": {
+    "allow": [
+      "Bash(bash ~/.codebuddy/hooks/buddy-hook.sh*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

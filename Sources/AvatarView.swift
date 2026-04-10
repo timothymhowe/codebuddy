@@ -10,6 +10,7 @@ struct AvatarView: View {
     @State private var currentPhrase: String?
     @State private var showPhrase = false
     @State private var jiggleTrigger = 0
+    @State private var lastSpokeAt: Date = .distantPast
 
     let blinkTimer = Timer.publish(every: 3.5, on: .main, in: .common).autoconnect()
     private let voice = BuddyVoice()
@@ -71,14 +72,25 @@ struct AvatarView: View {
     }
 
     private func updatePhrase() {
-        // Only auto-speak on error/success — claude handles snark via the skill
-        guard state.currentState == .error || state.currentState == .success else { return }
+        // Custom message from Claude — always show, bypass cooldown
+        if let msg = state.lastMessage {
+            state.lastMessage = nil
+            showBubble(msg)
+            return
+        }
 
-        if snarky.isAvailable {
-            snarky.generate(activity: state.currentState, context: state.lastContext) { [self] text in
-                showBubble(text ?? persona.randomPhrase(for: state.currentState) ?? "")
-            }
-        } else if let phrase = persona.randomPhrase(for: state.currentState) {
+        // Skip idle/coding for auto-phrases
+        switch state.currentState {
+        case .idle, .coding: return
+        case .thinking, .running, .error, .success: break
+        }
+
+        // Cooldown — only auto-talk once per minute
+        let now = Date()
+        guard now.timeIntervalSince(lastSpokeAt) > 60 else { return }
+
+        if let phrase = persona.randomPhrase(for: state.currentState) {
+            lastSpokeAt = now
             showBubble(phrase)
         }
     }
@@ -90,7 +102,7 @@ struct AvatarView: View {
             showPhrase = true
         }
         if settings.voiceEnabled {
-            voice.speak(text, persona: persona.id, activity: state.currentState)
+            voice.speak(text, persona: persona.id, activity: state.currentState, volume: settings.volume)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             withAnimation(.easeOut(duration: 0.3)) {

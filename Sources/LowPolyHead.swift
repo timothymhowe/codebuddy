@@ -36,59 +36,52 @@ struct LowPolyHead: NSViewRepresentable {
         var lastJiggle = 0
         var lastActivity: BuddyActivity?
         var hasCustomModel = false
-        var animTotalDuration: Double = 24.233
-        var totalFrames: Double = 593
         var edgeObserver: Any?
         var baseScale: CGFloat = 1.0
         var savedEuler: SCNVector3 = .init()
+        /// Loaded animation clips keyed by name
+        var animClips: [String: SCNAnimation] = [:]
+        /// The bone node that animations should be played on
+        var animTargetNode: SCNNode?
     }
 
-    // MARK: - Animation segments (frames at 25fps, 593 total)
+    // MARK: - Animation clips
 
-    struct AnimSegment {
-        let startFrame: Double
-        let endFrame: Double
+    struct AnimClipInfo {
+        let filename: String
         let loops: Bool
-
-        // USDZ total duration is 24.233s across 593 blender frames
-        // Timing scale factor to align with actual playback
-        static let scale: Double = 24.233 / 593.0
-
-        var startTime: Double { startFrame * AnimSegment.scale }
-        var endTime: Double { endFrame * AnimSegment.scale }
-        var duration: Double { endTime - startTime }
     }
 
-    static let animSegments: [String: AnimSegment] = [
-        "idle1":    AnimSegment(startFrame: 0,   endFrame: 127, loops: true),
-        "jump":     AnimSegment(startFrame: 128, endFrame: 148, loops: false),
-        "walk":     AnimSegment(startFrame: 149, endFrame: 177, loops: true),
-        "run1":     AnimSegment(startFrame: 178, endFrame: 197, loops: true),
-        "falls1":   AnimSegment(startFrame: 198, endFrame: 224, loops: false),
-        "wakesup1": AnimSegment(startFrame: 225, endFrame: 253, loops: false),
-        "idle2":    AnimSegment(startFrame: 254, endFrame: 339, loops: true),
-        "no":       AnimSegment(startFrame: 340, endFrame: 369, loops: false),
-        "yes":      AnimSegment(startFrame: 370, endFrame: 400, loops: false),
-        "waving":   AnimSegment(startFrame: 401, endFrame: 421, loops: false),
-        "happy":    AnimSegment(startFrame: 422, endFrame: 441, loops: false),
-        "attack1":  AnimSegment(startFrame: 442, endFrame: 460, loops: false),
-        "falls2":   AnimSegment(startFrame: 461, endFrame: 484, loops: false),
-        "wakesup2": AnimSegment(startFrame: 485, endFrame: 495, loops: false),
-        "falls3":   AnimSegment(startFrame: 496, endFrame: 519, loops: false),
-        "wakesup3": AnimSegment(startFrame: 520, endFrame: 530, loops: false),
-        "run2":     AnimSegment(startFrame: 531, endFrame: 546, loops: true),
-        "attack2":  AnimSegment(startFrame: 547, endFrame: 563, loops: false),
-        "dmg1":     AnimSegment(startFrame: 564, endFrame: 578, loops: false),
-        "dmg2":     AnimSegment(startFrame: 579, endFrame: 593, loops: false),
+    static let clipMap: [String: AnimClipInfo] = [
+        "idle1":    AnimClipInfo(filename: "idle1.dae", loops: true),
+        "idle2":    AnimClipInfo(filename: "idle2.dae", loops: true),
+        "jump":     AnimClipInfo(filename: "jump.dae", loops: false),
+        "walk":     AnimClipInfo(filename: "walk.dae", loops: true),
+        "run":      AnimClipInfo(filename: "run.dae", loops: true),
+        "run2":     AnimClipInfo(filename: "run2.dae", loops: true),
+        "falls1":   AnimClipInfo(filename: "falls1.dae", loops: false),
+        "falls2":   AnimClipInfo(filename: "falls2.dae", loops: false),
+        "falls3":   AnimClipInfo(filename: "falls3.dae", loops: false),
+        "wakesup1": AnimClipInfo(filename: "wakesup1.dae", loops: false),
+        "wakesup2": AnimClipInfo(filename: "wakesup2.dae", loops: false),
+        "wakesup3": AnimClipInfo(filename: "wakesup3.dae", loops: false),
+        "no":       AnimClipInfo(filename: "no.dae", loops: false),
+        "yes":      AnimClipInfo(filename: "yes.dae", loops: false),
+        "waving":   AnimClipInfo(filename: "waving.dae", loops: false),
+        "happy":    AnimClipInfo(filename: "happy.dae", loops: false),
+        "attack1":  AnimClipInfo(filename: "attack1.dae", loops: false),
+        "attack2":  AnimClipInfo(filename: "attack2.dae", loops: false),
+        "dmg1":     AnimClipInfo(filename: "dmg1.dae", loops: false),
+        "dmg2":     AnimClipInfo(filename: "dmg2.dae", loops: false),
     ]
 
-    /// Map buddy activity to animation name
+    /// Map buddy activity to clip name
     static func animName(for activity: BuddyActivity) -> String {
         switch activity {
         case .idle:     return "idle2"
         case .thinking: return "idle1"
         case .coding:   return "walk"
-        case .running:  return "run1"
+        case .running:  return "run"
         case .error:    return "no"
         case .success:  return "happy"
         }
@@ -102,7 +95,14 @@ struct LowPolyHead: NSViewRepresentable {
             FileManager.default.currentDirectoryPath + "/models",
             NSHomeDirectory() + "/.codebuddy/models",
         ]
-        // Prioritize usdz (embedded textures) over dae
+        // Check for anims folder first — if it exists, use idle1.dae as the base model
+        // (dae clips have matching skeleton hierarchy for animation swapping)
+        for dir in dirs {
+            let animDir = dir + "/chubby/anims"
+            let idlePath = animDir + "/idle1.dae"
+            if FileManager.default.fileExists(atPath: idlePath) { return idlePath }
+        }
+        // Fallback to single model file
         for dir in dirs {
             for ext in ["usdz", "dae", "scn", "obj"] {
                 let path = dir + "/" + personaId + "." + ext
@@ -132,9 +132,9 @@ struct LowPolyHead: NSViewRepresentable {
         scene.rootNode.addChildNode(cam)
 
         // ── Lights ──
-        light(.directional, i: 850, e: SCNVector3(-0.5, 0.35, 0), scene)
-        light(.directional, i: 280, e: SCNVector3(-0.15, -0.5, 0), scene)
-        light(.ambient, i: 550, e: .init(), scene)
+        light(.directional, i: 1000, e: SCNVector3(-0.5, 0.35, 0), scene)
+        light(.directional, i: 200, e: SCNVector3(-0.15, -0.5, 0), scene)
+        light(.ambient, i: 250, e: .init(), scene)
 
         // ── Try loading custom 3D model ──
         if let modelPath = customModelPath {
@@ -350,59 +350,38 @@ struct LowPolyHead: NSViewRepresentable {
         if c.hasCustomModel && activity != c.lastActivity {
             let prevActivity = c.lastActivity
             c.lastActivity = activity
+            let clips = c.animClips
 
-            guard let charNode = c.charNode else { return }
+            guard let charNode = c.charNode,
+                  let animNode = c.animTargetNode else { return }
 
             if activity == .coding {
-                // Jump-turn-walk sequence: jump + rotate 90° to face travel direction
-                if let jumpSeg = LowPolyHead.animSegments["jump"],
-                   let walkSeg = LowPolyHead.animSegments["walk"] {
-                    LowPolyHead.applySegment(jumpSeg, to: charNode)
-                    // Absolute rotation to 90° (sideways)
-                    SCNTransaction.begin()
-                    SCNTransaction.animationDuration = jumpSeg.duration
-                    charNode.eulerAngles.y = -CGFloat.pi / 2
-                    SCNTransaction.commit()
-                    // After jump: switch to walk loop
-                    DispatchQueue.main.asyncAfter(deadline: .now() + jumpSeg.duration) {
-                        LowPolyHead.applySegment(walkSeg, to: charNode)
-                    }
+                let jumpDur = clips["jump"]?.duration ?? 0.8
+                LowPolyHead.playClip("jump", on: animNode, clips: clips)
+                SCNTransaction.begin()
+                SCNTransaction.animationDuration = jumpDur
+                charNode.eulerAngles.y = -CGFloat.pi / 2
+                SCNTransaction.commit()
+                DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
+                    LowPolyHead.playClip("walk", on: animNode, clips: clips)
                 }
             } else if prevActivity == .coding {
-                // Leaving walk: jump-turn back to face camera
-                if let jumpSeg = LowPolyHead.animSegments["jump"] {
-                    LowPolyHead.applySegment(jumpSeg, to: charNode)
-                    // Absolute rotation back to 0° (facing camera)
-                    SCNTransaction.begin()
-                    SCNTransaction.animationDuration = jumpSeg.duration
-                    charNode.eulerAngles.y = 0
-                    SCNTransaction.commit()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + jumpSeg.duration) {
-                        let animName = LowPolyHead.animName(for: activity)
-                        if let seg = LowPolyHead.animSegments[animName] {
-                            LowPolyHead.applySegment(seg, to: charNode)
-                            if !seg.loops {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + seg.duration) {
-                                    if let idle = LowPolyHead.animSegments["idle2"] {
-                                        LowPolyHead.applySegment(idle, to: charNode)
-                                    }
-                                }
-                            }
-                        }
+                let jumpDur = clips["jump"]?.duration ?? 0.8
+                LowPolyHead.playClip("jump", on: animNode, clips: clips)
+                SCNTransaction.begin()
+                SCNTransaction.animationDuration = jumpDur
+                charNode.eulerAngles.y = 0
+                SCNTransaction.commit()
+                DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
+                    let name = LowPolyHead.animName(for: activity)
+                    LowPolyHead.playClip(name, on: animNode, clips: clips) {
+                        LowPolyHead.playClip("idle2", on: animNode, clips: clips)
                     }
                 }
             } else {
-                // Normal state change
-                let animName = LowPolyHead.animName(for: activity)
-                if let seg = LowPolyHead.animSegments[animName] {
-                    LowPolyHead.applySegment(seg, to: charNode)
-                    if !seg.loops {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + seg.duration) {
-                            if let idle = LowPolyHead.animSegments["idle2"] {
-                                LowPolyHead.applySegment(idle, to: charNode)
-                            }
-                        }
-                    }
+                let name = LowPolyHead.animName(for: activity)
+                LowPolyHead.playClip(name, on: animNode, clips: clips) {
+                    LowPolyHead.playClip("idle2", on: animNode, clips: clips)
                 }
             }
         }
@@ -506,8 +485,16 @@ struct LowPolyHead: NSViewRepresentable {
             ch.runAction(nudge, forKey: "nudge")
         }
 
-        // ── Jiggle ──
-        if jiggleTrigger != c.lastJiggle {
+        // ── Tap → play happy animation then return to idle ──
+        if jiggleTrigger != c.lastJiggle && c.hasCustomModel {
+            c.lastJiggle = jiggleTrigger
+            if let animNode = c.animTargetNode {
+                LowPolyHead.playClip("happy", on: animNode, clips: c.animClips) {
+                    LowPolyHead.playClip("idle2", on: animNode, clips: c.animClips)
+                }
+            }
+        } else if jiggleTrigger != c.lastJiggle {
+            // Procedural chibi fallback — scale jiggle
             c.lastJiggle = jiggleTrigger
             if let ch = c.charNode {
                 let s = c.baseScale
@@ -519,16 +506,7 @@ struct LowPolyHead: NSViewRepresentable {
                     .scale(to: s * 1.02, duration: 0.04),
                     .scale(to: s, duration: 0.03),
                 ])
-                // Wobble that returns to exactly zero
-                let savedAngles = ch.eulerAngles
-                let wobble = SCNAction.sequence([
-                    .rotateBy(x: 0, y: 0, z: 0.18, duration: 0.04),
-                    .rotateBy(x: 0, y: 0, z: -0.36, duration: 0.04),
-                    .rotateBy(x: 0, y: 0, z: 0.25, duration: 0.04),
-                    .rotateBy(x: 0, y: 0, z: -0.07, duration: 0.03),
-                    .run { node in node.eulerAngles = savedAngles },
-                ])
-                ch.runAction(.group([squish, wobble]), forKey: "jiggle")
+                ch.runAction(squish, forKey: "jiggle")
             }
         }
     }
@@ -558,19 +536,26 @@ struct LowPolyHead: NSViewRepresentable {
             character.addChildNode(child.clone())
         }
 
-        // Apply loose textures if no embedded ones (dae models)
-        let isUSDZ = path.hasSuffix(".usdz")
-        if !isUSDZ {
-            let texDir = (path as NSString).deletingLastPathComponent + "/textures/"
-            applyTextures(to: character, from: texDir)
+        // Apply texture — load dog.png from same folder and apply to all materials
+        let modelDir = (path as NSString).deletingLastPathComponent
+        func applyDogTexture(_ n: SCNNode) {
+            if let geo = n.geometry {
+                let texPath = modelDir + "/dog.png"
+                if let img = NSImage(contentsOfFile: texPath) {
+                    for mat in geo.materials {
+                        mat.diffuse.contents = img
+                        mat.lightingModel = .phong
+                    }
+                }
+            }
+            for c in n.childNodes { applyDogTexture(c) }
         }
+        applyDogTexture(character)
 
-        // Fix orientation based on format
+        // Blender DAE is Z-up → rotate to Y-up
         if path.hasSuffix(".dae") {
-            // MMD/PMX exports: Z-up → Y-up
-            character.eulerAngles = SCNVector3(-CGFloat.pi / 2, 0, 0)
+            character.eulerAngles.x = -CGFloat.pi / 2
         }
-        // USDZ is already Y-up, no rotation needed
 
         // Auto-fit
         character.flattenedClone() // force bbox recalc
@@ -609,76 +594,93 @@ struct LowPolyHead: NSViewRepresentable {
         }
         stripRoot(character)
 
-        // Fix eyes — solid black button eyes
-        func fixEyes(_ n: SCNNode) {
-            let name = (n.name ?? "").lowercased()
-            if name.contains("eye") {
-                if let geo = n.geometry {
-                    for mat in geo.materials {
-                        mat.diffuse.contents = NSColor.black
-                        mat.lightingModel = .constant
-                    }
-                }
-            }
-            for c in n.childNodes { fixEyes(c) }
-        }
-        fixEyes(character)
+        // Eyes use the same dog.png texture — no override needed for dae models
 
         // Store base scale and initial rotation for clamping
         context.coordinator.baseScale = fitScale
         context.coordinator.savedEuler = character.eulerAngles
         context.coordinator.hasCustomModel = true
-        if let seg = LowPolyHead.animSegments["idle2"] {
-            LowPolyHead.applySegment(seg, to: character)
+
+        // Load separate animation clips from same folder as the model
+        let animDir = (path as NSString).deletingLastPathComponent
+        context.coordinator.animClips = LowPolyHead.loadClips(from: animDir)
+
+        // Find the bone node that animations target (chest node)
+        func findNode(named target: String, in node: SCNNode) -> SCNNode? {
+            if node.name == target { return node }
+            for c in node.childNodes {
+                if let found = findNode(named: target, in: c) { return found }
+            }
+            return nil
+        }
+        // Play on petArmat (armature root) so all bones get animated including feet
+        context.coordinator.animTargetNode =
+            findNode(named: "petArmat", in: character)
+            ?? findNode(named: "hips", in: character)
+            ?? findNode(named: "chest", in: character)
+
+        // Strip all baked animations
+        func stripAllAnims(_ n: SCNNode) {
+            for key in n.animationKeys { n.removeAnimation(forKey: key) }
+            for c in n.childNodes { stripAllAnims(c) }
+        }
+        stripAllAnims(character)
+
+        // Play initial idle on the target bone
+        if let target = context.coordinator.animTargetNode {
+            LowPolyHead.playClip("idle2", on: target, clips: context.coordinator.animClips)
         }
 
         // Listen for edge hits to play jump-turn
+        let clips = context.coordinator.animClips
+        let animTarget = context.coordinator.animTargetNode
         context.coordinator.edgeObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyEdgeHit"),
             object: nil, queue: .main
-        ) { [weak character] notif in
-            guard let charNode = character,
-                  let dir = notif.userInfo?["direction"] as? CGFloat,
-                  let jumpSeg = LowPolyHead.animSegments["jump"],
-                  let walkSeg = LowPolyHead.animSegments["walk"] else { return }
-
-            // Play jump animation
-            LowPolyHead.applySegment(jumpSeg, to: charNode)
-
-            // Flip to face new direction
+        ) { [weak character, weak animTarget] notif in
+            guard let charNode = character, let aNode = animTarget,
+                  let dir = notif.userInfo?["direction"] as? CGFloat else { return }
+            let jumpDur = clips["jump"]?.duration ?? 0.8
+            LowPolyHead.playClip("jump", on: aNode, clips: clips)
             let targetY: CGFloat = dir > 0 ? -CGFloat.pi / 2 : CGFloat.pi / 2
             SCNTransaction.begin()
-            SCNTransaction.animationDuration = jumpSeg.duration
+            SCNTransaction.animationDuration = jumpDur
             charNode.eulerAngles.y = targetY
             SCNTransaction.commit()
-
-            // Resume walk after jump
-            DispatchQueue.main.asyncAfter(deadline: .now() + jumpSeg.duration) {
-                LowPolyHead.applySegment(walkSeg, to: charNode)
+            DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
+                LowPolyHead.playClip("walk", on: aNode, clips: clips)
             }
         }
 
-        // On drop: play falls1 immediately
+        // On drop: play falls1
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyDropped"),
             object: nil, queue: .main
-        ) { [weak character] _ in
-            guard let charNode = character,
-                  let fallSeg = LowPolyHead.animSegments["falls1"] else { return }
-            LowPolyHead.applySegment(fallSeg, to: charNode)
+        ) { [weak animTarget] _ in
+            guard let aNode = animTarget else { return }
+            LowPolyHead.playClip("falls1", on: aNode, clips: clips)
         }
 
-        // On land: play wakesup1 → idle2
+        // On land: wakesup1 → idle2
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyLanded"),
             object: nil, queue: .main
-        ) { [weak character] _ in
-            guard let charNode = character,
-                  let wakeSeg = LowPolyHead.animSegments["wakesup1"],
-                  let idleSeg = LowPolyHead.animSegments["idle2"] else { return }
-            LowPolyHead.applySegment(wakeSeg, to: charNode)
-            DispatchQueue.main.asyncAfter(deadline: .now() + wakeSeg.duration) {
-                LowPolyHead.applySegment(idleSeg, to: charNode)
+        ) { [weak animTarget] _ in
+            guard let aNode = animTarget else { return }
+            LowPolyHead.playClip("wakesup1", on: aNode, clips: clips) {
+                LowPolyHead.playClip("idle2", on: aNode, clips: clips)
+            }
+        }
+
+        // Test clip player — menu bar → Test Clips
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("BuddyTestClip"),
+            object: nil, queue: .main
+        ) { [weak animTarget] notif in
+            guard let aNode = animTarget,
+                  let clipName = notif.userInfo?["clip"] as? String else { return }
+            LowPolyHead.playClip(clipName, on: aNode, clips: clips) {
+                LowPolyHead.playClip("idle2", on: aNode, clips: clips)
             }
         }
 
@@ -700,43 +702,46 @@ struct LowPolyHead: NSViewRepresentable {
         return view
     }
 
-    // MARK: - Animation Segment Player
+    // MARK: - Animation Clip Player
 
-    private static var loopTimer: Timer?
-
-    static func applySegment(_ seg: AnimSegment, to node: SCNNode) {
-        // Kill any existing loop timer
-        loopTimer?.invalidate()
-        loopTimer = nil
-
-        func apply(_ n: SCNNode) {
-            let name = (n.name ?? "").lowercased()
-            if name.starts(with: "b0") && !name.contains("skin") {
-                for c in n.childNodes { apply(c) }
-                return
+    /// Load all animation clips from the anims/ folder
+    static func loadClips(from dir: String) -> [String: SCNAnimation] {
+        var clips: [String: SCNAnimation] = [:]
+        for (name, info) in clipMap {
+            let path = dir + "/" + info.filename
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let src = SCNSceneSource(data: data, options: nil) else { continue }
+            // Find the petArmat animation container (has the full body anim)
+            let animIDs = src.identifiersOfEntries(withClass: CAAnimation.self)
+            let targetID = animIDs.first(where: { $0.contains("petArmat") && $0.starts(with: "action_container") })
+                ?? animIDs.first(where: { $0.contains("petArmat") })
+                ?? animIDs.first(where: { !$0.contains("eyes") })
+            if let id = targetID,
+               let caAnim = src.entryWithIdentifier(id, withClass: CAAnimation.self),
+               caAnim.duration > 0 {
+                let anim = SCNAnimation(caAnimation: caAnim)
+                anim.repeatCount = info.loops ? .infinity : 1
+                clips[name] = anim
             }
-            for key in n.animationKeys {
-                if let player = n.animationPlayer(forKey: key) {
-                    let anim = player.animation
-                    n.removeAnimation(forKey: key)
-                    anim.timeOffset = seg.startTime
-                    anim.repeatCount = 0
-                    let newPlayer = SCNAnimationPlayer(animation: anim)
-                    n.addAnimationPlayer(newPlayer, forKey: key)
-                    newPlayer.play()
-                }
-            }
-            for c in n.childNodes { apply(c) }
         }
-        apply(node)
+        return clips
+    }
 
-        // Single timer for looping — restarts all anims together
-        if seg.loops {
-            // Preserve rotation so animations can't drift any axis
-            let savedAngles = node.eulerAngles
-            loopTimer = Timer.scheduledTimer(withTimeInterval: seg.duration, repeats: true) { _ in
-                apply(node)
-                node.eulerAngles = savedAngles
+    /// Play a named clip on a node
+    static func playClip(_ name: String, on node: SCNNode, clips: [String: SCNAnimation],
+                         completion: (() -> Void)? = nil) {
+        guard let anim = clips[name] else { return }
+        // Remove current animation
+        node.removeAnimation(forKey: "currentClip")
+        // Add new
+        let player = SCNAnimationPlayer(animation: anim)
+        node.addAnimationPlayer(player, forKey: "currentClip")
+        player.play()
+
+        // If one-shot, fire completion after duration
+        if let info = clipMap[name], !info.loops, let cb = completion {
+            DispatchQueue.main.asyncAfter(deadline: .now() + anim.duration) {
+                cb()
             }
         }
     }
