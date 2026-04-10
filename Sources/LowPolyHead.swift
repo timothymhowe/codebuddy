@@ -31,6 +31,7 @@ struct LowPolyHead: NSViewRepresentable {
         var animTotalDuration: Double = 24.233
         var totalFrames: Double = 593
         var edgeObserver: Any?
+        var baseScale: CGFloat = 1.0
     }
 
     // MARK: - Animation segments (frames at 25fps, 593 total)
@@ -118,7 +119,7 @@ struct LowPolyHead: NSViewRepresentable {
         let cam = SCNNode()
         cam.camera = SCNCamera()
         cam.camera?.fieldOfView = 28
-        cam.position = SCNVector3(0, -0.25, 6.0)
+        cam.position = SCNVector3(0, 0.35, 6.0)
         scene.rootNode.addChildNode(cam)
 
         // ── Lights ──
@@ -500,20 +501,23 @@ struct LowPolyHead: NSViewRepresentable {
         if jiggleTrigger != c.lastJiggle {
             c.lastJiggle = jiggleTrigger
             if let ch = c.charNode {
+                let s = c.baseScale
                 let squish = SCNAction.sequence([
-                    .scale(to: 1.15, duration: 0.05),
-                    .scale(to: 0.88, duration: 0.05),
-                    .scale(to: 1.08, duration: 0.05),
-                    .scale(to: 0.95, duration: 0.04),
-                    .scale(to: 1.02, duration: 0.04),
-                    .scale(to: 1.0, duration: 0.03),
+                    .scale(to: s * 1.15, duration: 0.05),
+                    .scale(to: s * 0.88, duration: 0.05),
+                    .scale(to: s * 1.08, duration: 0.05),
+                    .scale(to: s * 0.95, duration: 0.04),
+                    .scale(to: s * 1.02, duration: 0.04),
+                    .scale(to: s, duration: 0.03),
                 ])
+                // Wobble that returns to exactly zero
+                let savedAngles = ch.eulerAngles
                 let wobble = SCNAction.sequence([
                     .rotateBy(x: 0, y: 0, z: 0.18, duration: 0.04),
                     .rotateBy(x: 0, y: 0, z: -0.36, duration: 0.04),
                     .rotateBy(x: 0, y: 0, z: 0.25, duration: 0.04),
-                    .rotateBy(x: 0, y: 0, z: -0.1, duration: 0.03),
-                    .rotateBy(x: 0, y: 0, z: 0.03, duration: 0.03),
+                    .rotateBy(x: 0, y: 0, z: -0.07, duration: 0.03),
+                    .run { node in node.eulerAngles = savedAngles },
                 ])
                 ch.runAction(.group([squish, wobble]), forKey: "jiggle")
             }
@@ -611,7 +615,8 @@ struct LowPolyHead: NSViewRepresentable {
         }
         fixEyes(character)
 
-        // Set initial animation to idle 2
+        // Store base scale for jiggle calculations
+        context.coordinator.baseScale = fitScale
         context.coordinator.hasCustomModel = true
         if let seg = LowPolyHead.animSegments["idle2"] {
             LowPolyHead.applySegment(seg, to: character)
@@ -640,6 +645,30 @@ struct LowPolyHead: NSViewRepresentable {
             // Resume walk after jump
             DispatchQueue.main.asyncAfter(deadline: .now() + jumpSeg.duration) {
                 LowPolyHead.applySegment(walkSeg, to: charNode)
+            }
+        }
+
+        // On drop: play falls1 immediately
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("BuddyDropped"),
+            object: nil, queue: .main
+        ) { [weak character] _ in
+            guard let charNode = character,
+                  let fallSeg = LowPolyHead.animSegments["falls1"] else { return }
+            LowPolyHead.applySegment(fallSeg, to: charNode)
+        }
+
+        // On land: play wakesup1 → idle2
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("BuddyLanded"),
+            object: nil, queue: .main
+        ) { [weak character] _ in
+            guard let charNode = character,
+                  let wakeSeg = LowPolyHead.animSegments["wakesup1"],
+                  let idleSeg = LowPolyHead.animSegments["idle2"] else { return }
+            LowPolyHead.applySegment(wakeSeg, to: charNode)
+            DispatchQueue.main.asyncAfter(deadline: .now() + wakeSeg.duration) {
+                LowPolyHead.applySegment(idleSeg, to: charNode)
             }
         }
 

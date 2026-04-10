@@ -12,19 +12,13 @@ struct AvatarView: View {
 
     let blinkTimer = Timer.publish(every: 3.5, on: .main, in: .common).autoconnect()
     private let voice = BuddyVoice()
+    private let snarky = SnarkyGenerator()
 
     private var persona: Persona { state.selectedPersona }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // ── Speech Bubble ──
-            if showPhrase, let phrase = currentPhrase {
-                SpeechBubble(text: phrase)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-            }
-            Spacer(minLength: 0)
-
-            // ── Character ──
+        ZStack(alignment: .bottom) {
+            // ── Character (pinned to bottom) ──
             LowPolyHead(
                 personaId: persona.id,
                 bodyColor: persona.bodyColor,
@@ -39,8 +33,15 @@ struct AvatarView: View {
             )
             .frame(width: 180, height: 180)
             .onTapGesture { jiggleTrigger += 1 }
+
+            // ── Speech Bubble (floats above, doesn't push) ──
+            if showPhrase, let phrase = currentPhrase {
+                SpeechBubble(text: phrase)
+                    .offset(y: -115)
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
         }
-        .frame(width: 180, height: 200)
+        .frame(width: 180, height: 180)
         .animation(.easeInOut(duration: 0.4), value: state.currentState)
         .onReceive(blinkTimer) { _ in blink() }
         .onChange(of: state.currentState) { _ in updatePhrase() }
@@ -69,14 +70,32 @@ struct AvatarView: View {
     }
 
     private func updatePhrase() {
-        guard let phrase = persona.randomPhrase(for: state.currentState) else { return }
+        // Try AI-generated snarky response first
+        if snarky.isAvailable {
+            snarky.generate(activity: state.currentState, context: state.lastContext) { [self] text in
+                if let text = text {
+                    showBubble(text)
+                } else {
+                    // Fallback to canned phrase
+                    if let phrase = persona.randomPhrase(for: state.currentState) {
+                        showBubble(phrase)
+                    }
+                }
+            }
+        } else {
+            // No API key — use canned phrases
+            if let phrase = persona.randomPhrase(for: state.currentState) {
+                showBubble(phrase)
+            }
+        }
+    }
+
+    private func showBubble(_ text: String) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-            currentPhrase = phrase
+            currentPhrase = text
             showPhrase = true
         }
-        // Voice — wav files if available, synth fallback
-        voice.speak(phrase, persona: persona.id, activity: state.currentState)
-
+        voice.speak(text, persona: persona.id, activity: state.currentState)
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             withAnimation(.easeOut(duration: 0.3)) {
                 showPhrase = false

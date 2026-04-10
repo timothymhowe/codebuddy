@@ -36,7 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let avatarView = AvatarView(state: buddyState)
 
         panel = FloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 180, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 180, height: 180),
             backing: .buffered,
             defer: false
         )
@@ -48,7 +48,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Slammed to absolute bottom of display
         if let screen = NSScreen.main {
             let x = screen.frame.maxX - 170
-            panel.setFrameOrigin(NSPoint(x: x, y: -20))
+            panel.setFrameOrigin(NSPoint(x: x, y: 0))
         }
 
         // When walking dog hits screen edge, trigger jump-turn on 3d model

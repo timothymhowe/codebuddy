@@ -33,9 +33,30 @@ class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    private var dragStart: NSPoint?
+
+    override func mouseDown(with event: NSEvent) {
+        dragStart = NSEvent.mouseLocation
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        // Only allow move after 5px drag threshold
+        if let start = dragStart {
+            let now = NSEvent.mouseLocation
+            let dist = hypot(now.x - start.x, now.y - start.y)
+            if dist > 5 {
+                isMovableByWindowBackground = true
+            }
+        }
+        super.mouseDragged(with: event)
+    }
+
     // MARK: - Gravity
 
     override func mouseUp(with event: NSEvent) {
+        isMovableByWindowBackground = true // reset for next drag
+        dragStart = nil
         super.mouseUp(with: event)
         startFalling()
     }
@@ -52,6 +73,7 @@ class FloatingPanel: NSPanel {
 
         velocity = 0
         hasPlayedLandSound = false
+        NotificationCenter.default.post(name: NSNotification.Name("BuddyDropped"), object: nil)
         fallTimer?.invalidate()
         fallTimer = Timer.scheduledTimer(
             withTimeInterval: 1.0 / 60.0,
@@ -73,10 +95,11 @@ class FloatingPanel: NSPanel {
             y = groundY
             velocity = -velocity * bounceDamp
 
-            // Play error sound on first impact
+            // First impact: sound + fall animation
             if !hasPlayedLandSound {
                 hasPlayedLandSound = true
                 playLandSound()
+                NotificationCenter.default.post(name: NSNotification.Name("BuddyLanded"), object: nil)
             }
 
             // Stop when bounce is tiny
