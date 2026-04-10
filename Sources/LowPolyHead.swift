@@ -16,12 +16,19 @@ struct LowPolyHead: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     class Coordinator: NSObject, SCNSceneRendererDelegate {
+        var savedAnimTargetEuler: SCNVector3 = .init()
+
         func renderer(_ renderer: SCNSceneRenderer, didApplyAnimationsAtTime time: TimeInterval) {
-            // Clamp X and Z rotation to prevent backward tilt drift
-            guard let ch = charNode, hasCustomModel else { return }
-            ch.eulerAngles.x = savedEuler.x
-            ch.eulerAngles.z = savedEuler.z
-            // Y is allowed to change (walk direction)
+            guard hasCustomModel else { return }
+            // Clamp character root rotation
+            if let ch = charNode {
+                ch.eulerAngles.x = savedEuler.x
+                ch.eulerAngles.z = savedEuler.z
+            }
+            // Clamp animation target (petArmat) — animations can drift it
+            if let at = animTargetNode {
+                at.eulerAngles = savedAnimTargetEuler
+            }
         }
 
         var charNode: SCNNode?
@@ -43,6 +50,7 @@ struct LowPolyHead: NSViewRepresentable {
         var animClips: [String: SCNAnimation] = [:]
         /// The bone node that animations should be played on
         var animTargetNode: SCNNode?
+        var animQueue: AnimationQueue?
     }
 
     // MARK: - Animation clips
@@ -133,8 +141,8 @@ struct LowPolyHead: NSViewRepresentable {
 
         // ── Lights ──
         light(.directional, i: 1000, e: SCNVector3(-0.5, 0.35, 0), scene)
-        light(.directional, i: 200, e: SCNVector3(-0.15, -0.5, 0), scene)
-        light(.ambient, i: 250, e: .init(), scene)
+        light(.directional, i: 150, e: SCNVector3(-0.15, -0.5, 0), scene)
+        light(.ambient, i: 100, e: .init(), scene)
 
         // ── Try loading custom 3D model ──
         if let modelPath = customModelPath {
@@ -350,39 +358,40 @@ struct LowPolyHead: NSViewRepresentable {
         if c.hasCustomModel && activity != c.lastActivity {
             let prevActivity = c.lastActivity
             c.lastActivity = activity
+
+            guard let charNode = c.charNode, let q = c.animQueue else { return }
             let clips = c.animClips
 
-            guard let charNode = c.charNode,
-                  let animNode = c.animTargetNode else { return }
-
             if activity == .coding {
+                // Jump, turn sideways, then walk loop
                 let jumpDur = clips["jump"]?.duration ?? 0.8
-                LowPolyHead.playClip("jump", on: animNode, clips: clips)
-                SCNTransaction.begin()
-                SCNTransaction.animationDuration = jumpDur
-                charNode.eulerAngles.y = -CGFloat.pi / 2
-                SCNTransaction.commit()
-                DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
-                    LowPolyHead.playClip("walk", on: animNode, clips: clips)
-                }
+                q.interrupt(with: [
+                    (clip: "jump", action: {
+                        SCNTransaction.begin()
+                        SCNTransaction.animationDuration = jumpDur
+                        charNode.eulerAngles.y = -CGFloat.pi / 2
+                        SCNTransaction.commit()
+                    }),
+                ], thenIdle: "walk")
             } else if prevActivity == .coding {
+                // Stop walking: jump, turn back to camera, then new state
                 let jumpDur = clips["jump"]?.duration ?? 0.8
-                LowPolyHead.playClip("jump", on: animNode, clips: clips)
-                SCNTransaction.begin()
-                SCNTransaction.animationDuration = jumpDur
-                charNode.eulerAngles.y = 0
-                SCNTransaction.commit()
-                DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
-                    let name = LowPolyHead.animName(for: activity)
-                    LowPolyHead.playClip(name, on: animNode, clips: clips) {
-                        LowPolyHead.playClip("idle2", on: animNode, clips: clips)
-                    }
-                }
-            } else {
                 let name = LowPolyHead.animName(for: activity)
-                LowPolyHead.playClip(name, on: animNode, clips: clips) {
-                    LowPolyHead.playClip("idle2", on: animNode, clips: clips)
-                }
+                q.interrupt(with: [
+                    (clip: "jump", action: {
+                        SCNTransaction.begin()
+                        SCNTransaction.animationDuration = jumpDur
+                        charNode.eulerAngles.y = 0
+                        SCNTransaction.commit()
+                    }),
+                    (clip: name, action: nil),
+                ], thenIdle: "idle2")
+            } else {
+                // Normal state change: play anim then idle
+                let name = LowPolyHead.animName(for: activity)
+                q.interrupt(with: [
+                    (clip: name, action: nil),
+                ], thenIdle: "idle2")
             }
         }
 
@@ -488,10 +497,8 @@ struct LowPolyHead: NSViewRepresentable {
         // ── Tap → play happy animation then return to idle ──
         if jiggleTrigger != c.lastJiggle && c.hasCustomModel {
             c.lastJiggle = jiggleTrigger
-            if let animNode = c.animTargetNode {
-                LowPolyHead.playClip("happy", on: animNode, clips: c.animClips) {
-                    LowPolyHead.playClip("idle2", on: animNode, clips: c.animClips)
-                }
+            if let q = c.animQueue {
+                q.interrupt(with: [(clip: "happy", action: nil)], thenIdle: "idle2")
             }
         } else if jiggleTrigger != c.lastJiggle {
             // Procedural chibi fallback — scale jiggle
@@ -626,62 +633,66 @@ struct LowPolyHead: NSViewRepresentable {
         }
         stripAllAnims(character)
 
-        // Play initial idle on the target bone
-        if let target = context.coordinator.animTargetNode {
-            LowPolyHead.playClip("idle2", on: target, clips: context.coordinator.animClips)
+        // Save anim target rotation for clamping
+        if let at = context.coordinator.animTargetNode {
+            context.coordinator.savedAnimTargetEuler = at.eulerAngles
         }
 
-        // Listen for edge hits to play jump-turn
+        // Create animation queue
+        context.coordinator.animQueue = AnimationQueue(
+            target: context.coordinator.animTargetNode,
+            clips: context.coordinator.animClips
+        )
+
+        // Play initial idle
+        context.coordinator.animQueue?.loop("idle2")
+
+        // Listen for edge hits: dmg → jump-turn → walk
         let clips = context.coordinator.animClips
-        let animTarget = context.coordinator.animTargetNode
+        let queue = context.coordinator.animQueue
         context.coordinator.edgeObserver = NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyEdgeHit"),
             object: nil, queue: .main
-        ) { [weak character, weak animTarget] notif in
-            guard let charNode = character, let aNode = animTarget,
+        ) { [weak character, weak queue] notif in
+            guard let charNode = character, let q = queue,
                   let dir = notif.userInfo?["direction"] as? CGFloat else { return }
             let jumpDur = clips["jump"]?.duration ?? 0.8
-            LowPolyHead.playClip("jump", on: aNode, clips: clips)
-            let targetY: CGFloat = dir > 0 ? -CGFloat.pi / 2 : CGFloat.pi / 2
-            SCNTransaction.begin()
-            SCNTransaction.animationDuration = jumpDur
-            charNode.eulerAngles.y = targetY
-            SCNTransaction.commit()
-            DispatchQueue.main.asyncAfter(deadline: .now() + jumpDur) {
-                LowPolyHead.playClip("walk", on: aNode, clips: clips)
-            }
+            let targetY: CGFloat = dir > 0 ? CGFloat.pi / 2 : -CGFloat.pi / 2
+            q.interrupt(with: [
+                (clip: "dmg1", action: nil),
+                (clip: "jump", action: {
+                    SCNTransaction.begin()
+                    SCNTransaction.animationDuration = jumpDur
+                    charNode.eulerAngles.y = targetY
+                    SCNTransaction.commit()
+                }),
+            ], thenIdle: "walk")
         }
 
-        // On drop: play falls1
+        // On drop: falls1
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyDropped"),
             object: nil, queue: .main
-        ) { [weak animTarget] _ in
-            guard let aNode = animTarget else { return }
-            LowPolyHead.playClip("falls1", on: aNode, clips: clips)
+        ) { [weak queue] _ in
+            queue?.interrupt(with: [(clip: "falls1", action: nil)], thenIdle: "falls1")
         }
 
         // On land: wakesup1 → idle2
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyLanded"),
             object: nil, queue: .main
-        ) { [weak animTarget] _ in
-            guard let aNode = animTarget else { return }
-            LowPolyHead.playClip("wakesup1", on: aNode, clips: clips) {
-                LowPolyHead.playClip("idle2", on: aNode, clips: clips)
-            }
+        ) { [weak queue] _ in
+            queue?.interrupt(with: [(clip: "wakesup1", action: nil)], thenIdle: "idle2")
         }
 
         // Test clip player — menu bar → Test Clips
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyTestClip"),
             object: nil, queue: .main
-        ) { [weak animTarget] notif in
-            guard let aNode = animTarget,
+        ) { [weak queue] notif in
+            guard let q = queue,
                   let clipName = notif.userInfo?["clip"] as? String else { return }
-            LowPolyHead.playClip(clipName, on: aNode, clips: clips) {
-                LowPolyHead.playClip("idle2", on: aNode, clips: clips)
-            }
+            q.interrupt(with: [(clip: clipName, action: nil)], thenIdle: "idle2")
         }
 
         // No extra sway

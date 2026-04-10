@@ -183,8 +183,8 @@ class FloatingPanel: NSPanel {
         walkTimer = nil
         onEdgeHit?(newDirection)
 
-        // Resume walking after jump animation (0.8s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) { [weak self] in
+        // Resume walking after dmg + jump animations (~1.4s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self = self, self.isWalking else { return }
             self.walkTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
                 self?.walkTick()
