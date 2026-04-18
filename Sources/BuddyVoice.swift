@@ -11,6 +11,7 @@ class BuddyVoice {
     init() {
         // Load the voice clip into memory
         let paths = [
+            (Bundle.main.resourcePath ?? "") + "/sounds/buddyvoice.wav",
             FileManager.default.currentDirectoryPath + "/sounds/buddyvoice.wav",
             NSHomeDirectory() + "/.codebuddy/sounds/buddyvoice.wav",
         ]

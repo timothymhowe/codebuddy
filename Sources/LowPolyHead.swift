@@ -20,16 +20,22 @@ struct LowPolyHead: NSViewRepresentable {
 
         func renderer(_ renderer: SCNSceneRenderer, didApplyAnimationsAtTime time: TimeInterval) {
             guard hasCustomModel else { return }
-            // Clamp character root rotation
+            // Clamp character root — all axes (Y only changes during walk)
             if let ch = charNode {
                 ch.eulerAngles.x = savedEuler.x
                 ch.eulerAngles.z = savedEuler.z
+                // Only clamp Y when not walking
+                if !isWalking {
+                    ch.eulerAngles.y = savedEuler.y
+                }
             }
-            // Clamp animation target (petArmat) — animations can drift it
+            // Clamp armature rotation
             if let at = animTargetNode {
                 at.eulerAngles = savedAnimTargetEuler
             }
         }
+
+        var isWalking = false
 
         var charNode: SCNNode?
         var headNode: SCNNode?
@@ -99,7 +105,7 @@ struct LowPolyHead: NSViewRepresentable {
 
     private var customModelPath: String? {
         let dirs = [
-            Bundle.main.resourcePath ?? "",
+            (Bundle.main.resourcePath ?? "") + "/models",
             FileManager.default.currentDirectoryPath + "/models",
             NSHomeDirectory() + "/.codebuddy/models",
         ]
@@ -363,7 +369,7 @@ struct LowPolyHead: NSViewRepresentable {
             let clips = c.animClips
 
             if activity == .coding {
-                // Jump, turn sideways, then walk loop
+                c.isWalking = true
                 let jumpDur = clips["jump"]?.duration ?? 0.8
                 q.interrupt(with: [
                     (clip: "jump", action: {
@@ -374,7 +380,7 @@ struct LowPolyHead: NSViewRepresentable {
                     }),
                 ], thenIdle: "walk")
             } else if prevActivity == .coding {
-                // Stop walking: jump, turn back to camera, then new state
+                c.isWalking = false
                 let jumpDur = clips["jump"]?.duration ?? 0.8
                 let name = LowPolyHead.animName(for: activity)
                 q.interrupt(with: [
@@ -669,20 +675,15 @@ struct LowPolyHead: NSViewRepresentable {
             ], thenIdle: "walk")
         }
 
-        // On drop: falls1
-        NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("BuddyDropped"),
-            object: nil, queue: .main
-        ) { [weak queue] _ in
-            queue?.interrupt(with: [(clip: "falls1", action: nil)], thenIdle: "falls1")
-        }
-
-        // On land: wakesup1 → idle2
+        // On land: falls1 → wakesup1 → idle2
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyLanded"),
             object: nil, queue: .main
         ) { [weak queue] _ in
-            queue?.interrupt(with: [(clip: "wakesup1", action: nil)], thenIdle: "idle2")
+            queue?.interrupt(with: [
+                (clip: "falls1", action: nil),
+                (clip: "wakesup1", action: nil),
+            ], thenIdle: "idle2")
         }
 
         // Test clip player — menu bar → Test Clips

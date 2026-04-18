@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var walkObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        FirstRunSetup.run()
         setupPanel()
         setupMenuBar()
         buddyState.startWatching()
