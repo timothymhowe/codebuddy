@@ -675,13 +675,21 @@ struct LowPolyHead: NSViewRepresentable {
             ], thenIdle: "walk")
         }
 
-        // On land: falls1 → wakesup1 → idle2
+        // On drop: play falls1 while airborne
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("BuddyDropped"),
+            object: nil, queue: .main
+        ) { [weak queue] _ in
+            queue?.clear()
+            queue?.enqueue("falls1")
+        }
+
+        // On land: wakesup1 → idle2
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("BuddyLanded"),
             object: nil, queue: .main
         ) { [weak queue] _ in
             queue?.interrupt(with: [
-                (clip: "falls1", action: nil),
                 (clip: "wakesup1", action: nil),
             ], thenIdle: "idle2")
         }
