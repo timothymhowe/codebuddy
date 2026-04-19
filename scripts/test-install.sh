@@ -10,9 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="0.0.0-test"
-ZIP="dist/CodeBuddy-$VERSION.zip"
-TAP="codebuddy-local/test"
-TAP_DIR="$(brew --repository)/Library/Taps/codebuddy-local/homebrew-test"
+ZIP="dist/CodePuppy-$VERSION.zip"
+TAP="codepuppy-local/test"
+TAP_DIR="$(brew --repository)/Library/Taps/codepuppy-local/homebrew-test"
 
 echo "🔨 building test bundle"
 ./scripts/make-app.sh "$VERSION" >/dev/null
@@ -20,35 +20,34 @@ echo "🔨 building test bundle"
 SHA=$(shasum -a 256 "$ZIP" | awk '{print $1}')
 ABS_ZIP="$(pwd)/$ZIP"
 
-# Clean slate: uninstall prior + drop any cached download + drop prior tap
-brew uninstall --cask codebuddy 2>/dev/null || true
-rm -f "$(brew --cache)"/*codebuddy* 2>/dev/null || true
-rm -f "$(brew --cache)"/Cask/*codebuddy* 2>/dev/null || true
+# Clean slate
+brew uninstall --cask codepuppy 2>/dev/null || true
+rm -f "$(brew --cache)"/*codepuppy* 2>/dev/null || true
+rm -f "$(brew --cache)"/Cask/*codepuppy* 2>/dev/null || true
 brew untap "$TAP" 2>/dev/null || true
 
-# Create a minimal local tap (brew tap-new needs a git repo, so init one)
 mkdir -p "$TAP_DIR/Casks"
 if [ ! -d "$TAP_DIR/.git" ]; then
     (cd "$TAP_DIR" && git init -q && git commit -q --allow-empty -m init)
 fi
 
-cat > "$TAP_DIR/Casks/codebuddy.rb" << CASK
-cask "codebuddy" do
+cat > "$TAP_DIR/Casks/codepuppy.rb" << CASK
+cask "codepuppy" do
   version "$VERSION"
   sha256 "$SHA"
 
   url "file://$ABS_ZIP"
-  name "CodeBuddy"
+  name "CodePuppy"
   desc "Floating 3D desktop companion for Claude Code"
   homepage "https://github.com/timothymhowe/codebuddy"
 
   depends_on macos: ">= :ventura"
 
-  app "CodeBuddy.app"
+  app "CodePuppy.app"
 
   postflight do
     system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/CodeBuddy.app"],
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/CodePuppy.app"],
                    sudo: false
   end
 
@@ -57,11 +56,11 @@ end
 CASK
 
 echo "📦 installing via brew from local tap $TAP"
-brew install --cask "$TAP/codebuddy"
+brew install --cask "$TAP/codepuppy"
 
 echo ""
-echo "✅ installed — /Applications/CodeBuddy.app"
+echo "✅ installed — /Applications/CodePuppy.app"
 echo ""
-echo "Try it:         open /Applications/CodeBuddy.app"
-echo "Uninstall:      brew uninstall --cask codebuddy"
+echo "Try it:         open /Applications/CodePuppy.app"
+echo "Uninstall:      brew uninstall --cask codepuppy"
 echo "Drop local tap: brew untap $TAP"

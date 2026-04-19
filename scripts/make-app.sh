@@ -1,32 +1,30 @@
 #!/bin/bash
-# Build CodeBuddy.app bundle + zip for homebrew cask distribution.
-# Outputs:  dist/CodeBuddy.app  and  dist/CodeBuddy-<version>.zip
+# Build CodePuppy.app bundle + zip for homebrew cask distribution.
+# Outputs:  dist/CodePuppy.app  and  dist/CodePuppy-<version>.zip
 #
 # Usage:  scripts/make-app.sh [version]
-#   version defaults to $CODEBUDDY_VERSION or "0.1.0"
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-${CODEBUDDY_VERSION:-0.1.0}}"
-APP_NAME="CodeBuddy"
-BUNDLE_ID="com.ailette.codebuddy"
+VERSION="${1:-${CODEBUDDY_VERSION:-0.2.0}}"
+APP_NAME="CodePuppy"
+BIN_NAME="CodeBuddy"   # SPM target name (stays CodeBuddy internally)
+BUNDLE_ID="com.ailette.codepuppy"
 DIST="dist"
 APP="$DIST/$APP_NAME.app"
 
 echo "🔨 Building $APP_NAME $VERSION (universal)"
 
-# Clean
 rm -rf "$DIST"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Universal binary — build arm64 + x86_64, lipo together
 swift build -c release --arch arm64 --arch x86_64
 BIN_PATH=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
-cp "$BIN_PATH/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
+cp "$BIN_PATH/$BIN_NAME" "$APP/Contents/MacOS/$APP_NAME"
 
-# Info.plist
 cat > "$APP/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -48,14 +46,15 @@ cat > "$APP/Contents/Info.plist" << PLIST
 PLIST
 
 # Copy resources into bundle
-cp -R models   "$APP/Contents/Resources/models"
-cp -R sounds   "$APP/Contents/Resources/sounds"
-cp -R hooks    "$APP/Contents/Resources/hooks"
+cp -R models                  "$APP/Contents/Resources/models"
+cp -R sounds                  "$APP/Contents/Resources/sounds"
+cp -R hooks                   "$APP/Contents/Resources/hooks"
+cp -R .claude/commands        "$APP/Contents/Resources/claude-commands"
 
-# Ad-hoc sign (users still need to right-click-open first time; see README)
+# Ad-hoc sign
 codesign --force --deep --sign - "$APP"
 
-# Zip for release (ditto preserves symlinks / extended attrs)
+# Zip for release
 ZIP="$DIST/$APP_NAME-$VERSION.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
@@ -65,6 +64,6 @@ echo "✅ Built $APP"
 echo "📦 $ZIP"
 echo "🔑 sha256: $SHA"
 echo ""
-echo "Next: upload $ZIP to a github release, then update Casks/codebuddy.rb with:"
+echo "Next: update tap's Casks/codepuppy.rb with:"
 echo "   version \"$VERSION\""
 echo "   sha256  \"$SHA\""

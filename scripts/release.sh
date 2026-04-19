@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 VERSION="${1:?usage: release.sh <version>}"
 TAG="v$VERSION"
-ZIP="dist/CodeBuddy-$VERSION.zip"
+ZIP="dist/CodePuppy-$VERSION.zip"
 
 # Ensure clean working tree
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -30,12 +30,12 @@ git push origin "$TAG"
 
 echo "📤 uploading to github release"
 gh release create "$TAG" "$ZIP" \
-    --title "CodeBuddy $TAG" \
+    --title "CodePuppy $TAG" \
     --notes "sha256: \`$SHA\`
 
 Install:
 \`\`\`
-brew install --cask timothymhowe/codebuddy/codebuddy
+brew install --cask timothymhowe/codebuddy/codepuppy
 \`\`\`"
 
 echo ""
