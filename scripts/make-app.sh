@@ -20,6 +20,12 @@ echo "🔨 Building $APP_NAME $VERSION (universal)"
 rm -rf "$DIST"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
+# Regenerate the app icon if source script is newer, or if the icon is missing
+if [ ! -f Resources/AppIcon.icns ] || [ scripts/render-icon.swift -nt Resources/AppIcon.icns ]; then
+    echo "🎨 rendering AppIcon.icns"
+    swift scripts/render-icon.swift >/dev/null
+fi
+
 # Universal binary — build arm64 + x86_64, lipo together
 swift build -c release --arch arm64 --arch x86_64
 BIN_PATH=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
@@ -34,6 +40,7 @@ cat > "$APP/Contents/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>        <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>              <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>       <string>$APP_NAME</string>
+    <key>CFBundleIconFile</key>          <string>AppIcon</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key>           <string>$VERSION</string>
@@ -46,6 +53,7 @@ cat > "$APP/Contents/Info.plist" << PLIST
 PLIST
 
 # Copy resources into bundle
+cp    Resources/AppIcon.icns  "$APP/Contents/Resources/AppIcon.icns"
 cp -R models                  "$APP/Contents/Resources/models"
 cp -R sounds                  "$APP/Contents/Resources/sounds"
 cp -R hooks                   "$APP/Contents/Resources/hooks"
