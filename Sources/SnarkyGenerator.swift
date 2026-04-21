@@ -83,10 +83,10 @@ class SnarkyGenerator {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 5
 
-        fetch(req) { json in
+        fetch(req) { [weak self] json in
             if let content = json?["content"] as? [[String: Any]],
                let text = content.first?["text"] as? String {
-                completion(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                completion(self?.clean(text))
             } else { completion(nil) }
         }
     }
@@ -119,13 +119,27 @@ class SnarkyGenerator {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 5
 
-        fetch(req) { json in
+        fetch(req) { [weak self] json in
             if let choices = json?["choices"] as? [[String: Any]],
                let msg = choices.first?["message"] as? [String: Any],
                let text = msg["content"] as? String {
-                completion(text.trimmingCharacters(in: .whitespacesAndNewlines))
-            } else { completion(nil) }
+                completion(self?.clean(text))
+            } else {
+                completion(nil)
+            }
         }
+    }
+
+    private func clean(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip matching leading/trailing quote pairs (LLMs love adding these)
+        for _ in 0..<2 {
+            if let first = s.first, let last = s.last,
+               first == last, "\"'“”‘’`".contains(first) {
+                s = String(s.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return s
     }
 
     // MARK: - Ollama (local)
@@ -144,9 +158,9 @@ class SnarkyGenerator {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         req.timeoutInterval = 10
 
-        fetch(req) { json in
+        fetch(req) { [weak self] json in
             if let text = json?["response"] as? String {
-                completion(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                completion(self?.clean(text))
             } else { completion(nil) }
         }
     }

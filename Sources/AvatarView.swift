@@ -89,7 +89,20 @@ struct AvatarView: View {
         let now = Date()
         guard now.timeIntervalSince(lastSpokeAt) > 60 else { return }
 
-        if let phrase = persona.randomPhrase(for: state.currentState) {
+        let fallback = persona.randomPhrase(for: state.currentState)
+
+        if snarky.isAvailable {
+            lastSpokeAt = now
+            let activity = state.currentState
+            let context = state.lastContext
+            snarky.generate(activity: activity, context: context) { reply in
+                let line = reply ?? fallback
+                if let line = line { showBubble(line) }
+            }
+            return
+        }
+
+        if let phrase = fallback {
             lastSpokeAt = now
             showBubble(phrase)
         }
